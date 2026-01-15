@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 from data.market_data import MarketQuery, fetch_ohlc
 from signals.indicators import IndicatorConfig, compute_signals
-
+from signals.evaluation import summarize_signal_performance
 
 st.set_page_config(page_title="Market Signals", layout="centered")
 st.title("📈 Market Signal Dashboard")
@@ -25,6 +25,7 @@ with st.sidebar:
         ma_long=st.slider("Long MA window", 20, 100, 30),
         deviation_threshold=st.slider("Deviation threshold (%)", 1.0, 10.0, 3.0) / 100,
     )
+    horizon_days = st.slider("Forward return horizon (trading days)", 1, 20, 5)
 
 # Fetch + compute
 query = MarketQuery(ticker=ticker.upper(), period=period)
@@ -76,3 +77,23 @@ col1, col2, col3 = st.columns(3)
 col1.metric("Price", f"{latest['Adj Close']:.2f}")
 col2.metric("Deviation", f"{latest['deviation']*100:.2f}%")
 col3.metric("Signal Active", "Yes" if latest["signal"] else "No")
+
+st.subheader("Evaluation (Baseline Check)")
+
+summary = summarize_signal_performance(signals, horizon_days=horizon_days)
+
+# Make it readable as percentages
+summary_display = summary.copy()
+summary_display["mean_fwd_return"] = (summary_display["mean_fwd_return"] * 100).round(3)
+summary_display["median_fwd_return"] = (summary_display["median_fwd_return"] * 100).round(3)
+
+st.dataframe(
+    summary_display,
+    use_container_width=True,
+    hide_index=True
+)
+
+signal_count = int(summary.loc[summary["group"] == "signal_days", "count"].iloc[0])
+st.caption(
+    f"Note: signal days are often rare. You have **{signal_count}** signal day(s) in this sample for the current settings."
+)

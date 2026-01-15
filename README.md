@@ -59,6 +59,7 @@ Day 2: Refactor, modularization, comfort score insight, favorites, polish
 
 Day 3: Built a market signals dashboard (SPY by default): OHLC fetch, returns/volatility, moving averages, deviation-based signal flags, Streamlit visualization.
 
+Day 4: Added signal evaluation using forward N-day returns (baseline check: signal vs non-signal vs overall) + interactive horizon control in the dashboard.
 
 📌 Next Ideas
 
