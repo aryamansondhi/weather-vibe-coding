@@ -1,5 +1,6 @@
 # market_app.py
 from __future__ import annotations
+from signals.backtest import compute_equity_curves, summarize_backtest
 
 import streamlit as st
 import matplotlib.pyplot as plt
@@ -76,6 +77,7 @@ with st.sidebar:
     ma_long = st.slider("Long MA window", 20, 100, default_ma_long)
     dev_pct = st.slider("Deviation threshold (%)", 1.0, 10.0, default_dev_pct)
     horizon_days = st.slider("Forward return horizon (trading days)", 1, 20, default_horizon)
+    cooldown_days = st.slider("Risk-off cooldown (days)", 1, 20, 5)
 
     cfg = IndicatorConfig(
         ma_short=ma_short,
@@ -101,6 +103,8 @@ if df.empty:
     st.stop()
 
 signals = compute_signals(df, cfg)
+bt = compute_equity_curves(signals, cooldown_days=cooldown_days)
+metrics = summarize_backtest(bt)
 
 # Fetch instrument metadata (lightweight)
 try:
@@ -178,4 +182,27 @@ st.caption("🔗 Tip: Bookmark or share this URL to save the current view.")
 signal_count = int(summary.loc[summary["group"] == "signal_days", "count"].iloc[0])
 st.caption(
     f"Note: signal days are often rare. You have **{signal_count}** signal day(s) in this sample for the current settings."
+)
+
+st.subheader("Backtest (Signal → Strategy)")
+
+# Equity curve chart
+fig3, ax3 = plt.subplots()
+ax3.plot(bt.index, bt["bh_equity"], label="Buy & Hold")
+ax3.plot(bt.index, bt["strat_equity"], label="Signal Strategy")
+ax3.set_ylabel("Equity (start = 1.0)")
+ax3.legend()
+st.pyplot(fig3)
+
+# Metrics table
+metrics_display = metrics.copy()
+for col in ["total_return", "ann_return", "ann_vol", "max_drawdown"]:
+    metrics_display[col] = (metrics_display[col] * 100).round(2)
+
+metrics_display["sharpe"] = metrics_display["sharpe"].round(2)
+
+st.dataframe(metrics_display, use_container_width=True, hide_index=True)
+
+st.caption(
+    "Strategy rule: if a signal triggers today, the strategy goes to cash starting next trading day for the cooldown window."
 )

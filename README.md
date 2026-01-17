@@ -64,6 +64,8 @@ Day 4: Added signal evaluation using forward N-day returns (baseline check: sign
 
 Day 5: URL-synced state for shareable, reproducible views
 
+Day 6: Backtest layer (risk-off cooldown strategy), equity curves, and core risk metrics (Sharpe, drawdown, vol).
+
 📌 Next Ideas
 
 Hourly forecast strip
