@@ -1,14 +1,53 @@
 # market_app.py
 from __future__ import annotations
 from signals.backtest import compute_equity_curves, summarize_backtest
+from signals.sweep import SweepConfig, run_sweep
 
 import streamlit as st
 import matplotlib.pyplot as plt
 import yfinance as yf
+import base64
 
 from data.market_data import MarketQuery, fetch_ohlc
 from signals.indicators import IndicatorConfig, compute_signals
 from signals.evaluation import summarize_signal_performance
+
+# --- UI Palette (High Contrast Dark Mode) ---
+BG_MAIN = "#0B0B0E"        # Deep black app background
+BG_PANEL = "#16161A"       # Lighter panel (was #111114)
+BORDER_SUBTLE = "#2A2A30"  # Much more visible border (was #1C1C22)
+
+TEXT_PRIMARY = "#F2F2F5"   # Brighter white
+TEXT_MUTED = "#A0A0A8"     # Lighter grey for better readability
+
+GREEN = "#00E050"          # Vivid green
+RED = "#FF5555"            # Vivid red
+NEUTRAL = "#A1A1AA"        # Secondary lines
+
+def style_dark_ax(ax):
+    ax.set_facecolor(BG_MAIN)
+    ax.grid(alpha=0.12)
+    ax.tick_params(colors=TEXT_MUTED)
+
+    ax.yaxis.label.set_color(TEXT_MUTED)
+    ax.xaxis.label.set_color(TEXT_MUTED)
+
+    for spine in ax.spines.values():
+        spine.set_color(BORDER_SUBTLE)
+
+def format_metrics_table(metrics):
+    m = metrics.copy()
+    for col in ["total_return", "ann_return", "ann_vol", "max_drawdown"]:
+        m[col] = (m[col] * 100).round(2)
+    m["sharpe"] = m["sharpe"].round(2)
+    return m.rename(columns={
+        "portfolio": "Portfolio",
+        "total_return": "Total Return (%)",
+        "ann_return": "Ann Return (%)",
+        "ann_vol": "Ann Vol (%)",
+        "max_drawdown": "Max DD (%)",
+        "sharpe": "Sharpe",
+    })
 
 def _get_qp() -> dict:
     # Streamlit provides st.query_params in newer versions
@@ -16,6 +55,10 @@ def _get_qp() -> dict:
         return dict(st.query_params)
     except Exception:
         return {}
+
+@st.cache_data(show_spinner=False)
+def cached_sweep(df, sweep_cfg):
+    return run_sweep(df, sweep_cfg)
 
 def _get_str(qp: dict, key: str, default: str) -> str:
     v = qp.get(key, default)
@@ -48,7 +91,134 @@ def _set_qp(params: dict) -> None:
         except Exception:
             pass
 
-st.set_page_config(page_title="Market Signals", layout="centered")
+st.set_page_config(
+    page_title="SignalLab",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# --- Logo ---
+# --- LOGO (HTML INJECTION) ---
+def get_base64_image(image_path):
+    with open(image_path, "rb") as img_file:
+        return base64.b64encode(img_file.read()).decode()
+
+# --- LOGO (HTML INJECTION) ---
+def get_base64_image(image_path):
+    with open(image_path, "rb") as img_file:
+        return base64.b64encode(img_file.read()).decode()
+
+# This HTML block guarantees centering
+logo_b64 = get_base64_image("logo.png")
+st.markdown(
+    f"""
+    <div style="display: flex; justify-content: center; margin-bottom: -10px;">
+        <img src="data:image/png;base64,{logo_b64}" width="400">
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+# --- Tabs ---
+tab_overview, tab_strategy, tab_research = st.tabs(["Overview", "Strategy", "Research"])
+
+st.markdown(
+    f"""
+    <style>
+    /* App background */
+    .stApp {{
+        background: {BG_MAIN};
+        color: {TEXT_PRIMARY};
+    }}
+
+    /* Sidebar */
+    section[data-testid="stSidebar"] {{
+        background: {BG_PANEL};
+        border-right: 1px solid {BORDER_SUBTLE};
+    }}
+
+    /* --- TABS CONFIGURATION --- */
+    div[data-baseweb="tab-list"] {{
+        justify-content: center;
+        width: 100%;
+        margin-top: 0;        /* Removes default space above tabs */
+        gap: 2rem;            /* Adds nice breathing room between tabs */
+        border-bottom: none !important;
+    }}
+    
+    /* HIDE NATIVE STREAMLIT TAB HIGHLIGHT (Fixes the glitch) */
+    div[data-baseweb="tab-highlight"] {{
+        display: none !important;
+    }}
+    
+    /* Tab Styling (Inactive) */
+    button[data-baseweb="tab"] {{
+        font-size: 16px !important;
+        font-weight: 600 !important;
+        background-color: transparent !important;
+        border: none !important;
+        color: {TEXT_MUTED};
+        padding: 0.5rem 1rem !important; 
+    }}
+    
+    /* Tab Styling (Active Only) */
+    button[data-baseweb="tab"][aria-selected="true"] {{
+        color: {TEXT_PRIMARY} !important;
+        border-bottom: 2px solid {GREEN} !important;
+    }}
+
+    /* Headers */
+    h1, h2, h3 {{
+        font-weight: 650;
+        letter-spacing: -0.02em;
+        color: {TEXT_PRIMARY};
+    }}
+
+    /* Captions */
+    .stCaption, [data-testid="stCaptionContainer"] {{
+        color: {TEXT_MUTED} !important;
+    }}
+
+    /* Metrics */
+    [data-testid="stMetricValue"] {{
+        font-size: 28px;
+        font-weight: 650;
+        color: {TEXT_PRIMARY};
+    }}
+    [data-testid="stMetricLabel"] {{
+        color: {TEXT_MUTED};
+    }}
+
+    /* Dataframes */
+    [data-testid="stDataFrame"] {{
+        background: {BG_PANEL};
+        border: 1px solid {BORDER_SUBTLE};
+        border-radius: 14px;
+        padding: 6px;
+    }}
+
+    /* Buttons */
+    .stButton>button {{
+        background: #222228 !important; 
+        color: {TEXT_PRIMARY} !important;
+        border: 1px solid {BORDER_SUBTLE} !important;
+        border-radius: 10px !important;
+        padding: 0.6rem 0.9rem !important;
+        font-weight: 600 !important;
+    }}
+    .stButton>button:hover {{
+        border-color: {TEXT_MUTED} !important;
+        color: {GREEN} !important;
+    }}
+
+    /* Clean up header */
+    header {{
+        background: transparent !important;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 qp = _get_qp()
 
@@ -78,6 +248,12 @@ with st.sidebar:
     dev_pct = st.slider("Deviation threshold (%)", 1.0, 10.0, default_dev_pct)
     horizon_days = st.slider("Forward return horizon (trading days)", 1, 20, default_horizon)
     cooldown_days = st.slider("Risk-off cooldown (days)", 1, 20, 5)
+
+    st.divider()
+    st.header("Research")
+
+    run_research = st.button("Run sweep")
+    min_signals = st.slider("Min signal count (filter)", 0, 50, 5)
 
     cfg = IndicatorConfig(
         ma_short=ma_short,
@@ -113,96 +289,153 @@ try:
 except Exception:
     long_name = ""
 
-# Title (now ticker + name are defined)
-title_line = f"📈 {ticker.upper()}"
-if long_name:
-    title_line += f" — {long_name}"
+with tab_overview:
 
-st.title(title_line)
-st.caption("Baseline financial signals — trends, volatility, and deviations")
+    # Title (now ticker + name are defined)
+    # --- Header ---
+    st.markdown(f"## {ticker.upper()}")
 
+    if long_name:
+        st.caption(long_name)
 
-# --- Price + MAs ---
-st.subheader("Price & Trend")
+    st.caption("Signals, backtest, and robustness in one place.")
 
-fig, ax = plt.subplots()
-ax.plot(signals.index, signals["Adj Close"], label="Adj Close")
-ax.plot(signals.index, signals["ma_short"], label="Short MA")
-ax.plot(signals.index, signals["ma_long"], label="Long MA")
+    # --- At-a-glance metrics ---
+    latest = signals.iloc[-1]
 
-# Mark signal points
-signal_points = signals[signals["signal"]]
-ax.scatter(
-    signal_points.index,
-    signal_points["Adj Close"],
-    color="red",
-    label="Signal",
-    zorder=5,
-)
+    c1, c2, c3, c4 = st.columns([1.2, 1, 1, 1])
+    c1.metric("Price", f"{latest['Adj Close']:.2f}")
+    c2.metric("Deviation", f"{latest['deviation']*100:.2f}%")
+    c3.metric("Volatility", f"{latest['volatility']*100:.2f}%")
+    c4.metric("Signal", "ON" if latest["signal"] else "OFF")
 
-ax.legend()
-ax.set_ylabel("Price")
-st.pyplot(fig)
+    # --- Price + MAs ---
+    fig, ax = plt.subplots(figsize=(12, 4))
+    fig.patch.set_facecolor(BG_MAIN)
+    style_dark_ax(ax)
 
+    ax.plot(signals.index, signals["Adj Close"], label="Price", color=TEXT_PRIMARY)
+    ax.plot(signals.index, signals["ma_short"], label="Short MA", color=NEUTRAL)
+    ax.plot(signals.index, signals["ma_long"], label="Long MA", color=GREEN)
 
-# --- Volatility --
-st.subheader("Rolling Volatility")
+    signal_points = signals[signals["signal"]]
+    if not signal_points.empty:
+        ax.scatter(signal_points.index, signal_points["Adj Close"], color=RED, label="Signal", zorder=5)
 
-fig2, ax2 = plt.subplots()
-ax2.plot(signals.index, signals["volatility"])
-ax2.set_ylabel("Volatility (Std of Returns)")
-st.pyplot(fig2)
+    ax.set_ylabel("Price")
 
+    leg = ax.legend(frameon=False)
+    for t in leg.get_texts():
+        t.set_color(TEXT_PRIMARY)
 
-# --- Latest signal summary ---
-latest = signals.iloc[-1]
+    st.pyplot(fig, use_container_width=True)
 
-st.subheader("Latest Snapshot")
+    # --- Volatility --
+    st.subheader("Rolling Volatility")
 
-col1, col2, col3 = st.columns(3)
-col1.metric("Price", f"{latest['Adj Close']:.2f}")
-col2.metric("Deviation", f"{latest['deviation']*100:.2f}%")
-col3.metric("Signal Active", "Yes" if latest["signal"] else "No")
+    fig2, ax2 = plt.subplots(figsize=(12, 4))
+    fig2.patch.set_facecolor(BG_MAIN)
+    style_dark_ax(ax2)
 
+    ax2.plot(signals.index, signals["volatility"], color=NEUTRAL)
+    ax2.set_ylabel("Volatility (Std of Returns)")
 
-# --- Evaluation ---
-st.subheader("Evaluation (Baseline Check)")
+    st.pyplot(fig2, use_container_width=True)
 
-summary = summarize_signal_performance(signals, horizon_days=horizon_days)
+    with tab_strategy:
+        # --- Evaluation ---
+        st.markdown("##### Evaluation (baseline check)")
 
-# Make it readable as percentages
-summary_display = summary.copy()
-summary_display["mean_fwd_return"] = (summary_display["mean_fwd_return"] * 100).round(3)
-summary_display["median_fwd_return"] = (summary_display["median_fwd_return"] * 100).round(3)
+        summary = summarize_signal_performance(signals, horizon_days=horizon_days)
 
-st.dataframe(summary_display, use_container_width=True, hide_index=True)
+        # Make it readable as percentages
+        summary_display = summary.copy()
+        summary_display["mean_fwd_return"] = (summary_display["mean_fwd_return"] * 100).round(3)
+        summary_display["median_fwd_return"] = (summary_display["median_fwd_return"] * 100).round(3)
+
+        st.caption("Forward returns grouped by signal vs non-signal days.")
+
+        st.dataframe(format_metrics_table(metrics), use_container_width=True, hide_index=True)
+
+        signal_count = int(summary.loc[summary["group"] == "signal_days", "count"].iloc[0])
+        st.caption(
+            f"Note: signal days are often rare. You have **{signal_count}** signal day(s) in this sample for the current settings."
+        )
+
+        st.subheader("Backtest (Signal → Strategy)")
+
+        # Equity curve chart
+        fig3, ax3 = plt.subplots(figsize=(12, 4))
+        fig3.patch.set_facecolor(BG_MAIN)
+        style_dark_ax(ax3)
+
+        ax3.plot(bt.index, bt["bh_equity"], label="Buy & Hold", color=NEUTRAL)
+        ax3.plot(bt.index, bt["strat_equity"], label="Signal Strategy", color=GREEN)
+        ax3.set_ylabel("Equity (start = 1.0)")
+
+        leg = ax3.legend(frameon=False)
+        for t in leg.get_texts():
+            t.set_color(TEXT_PRIMARY)
+
+        st.pyplot(fig3, use_container_width=True)
+
+        # Metrics table
+        metrics_display = metrics.copy()
+        for col in ["total_return", "ann_return", "ann_vol", "max_drawdown"]:
+            metrics_display[col] = (metrics_display[col] * 100).round(2)
+
+        metrics_display["sharpe"] = metrics_display["sharpe"].round(2)
+
+        st.markdown("##### Strategy metrics")
+
+        st.dataframe(format_metrics_table(metrics), use_container_width=True, hide_index=True)
+
+        st.caption(
+            "Strategy rule: if a signal triggers today, the strategy goes to cash starting next trading day for the cooldown window."
+        )
+
+    with tab_research:
+        st.subheader("Research (Parameter Sweep)")
+
+        st.caption("Runs a grid over deviation threshold and cooldown to check robustness. Filter out tiny sample sizes.")
+
+        if run_research:
+            sweep_cfg = SweepConfig(
+                ma_short=cfg.ma_short,
+                ma_long=cfg.ma_long,
+                dev_pcts=(1.0, 2.0, 3.0, 4.0, 5.0, 6.0),
+                cooldown_days=(1, 3, 5, 7, 10, 15),
+            )
+
+            with st.spinner("Running sweep…"):
+                res = cached_sweep(df, sweep_cfg)
+
+            if min_signals < 5:
+                st.warning("Low min signal threshold can produce misleading 'best' configs. Try 5+.")
+
+            # Filter weak sample sizes
+            res = res[res["signal_count"] >= min_signals].copy()
+
+            # Nice display formatting
+            disp = res.copy()
+            for col in ["strategy_total_return", "buyhold_total_return", "delta_total_return"]:
+                disp[col] = (disp[col] * 100).round(2)
+            disp["strategy_max_dd"] = (disp["strategy_max_dd"] * 100).round(2)
+            disp["strategy_sharpe"] = disp["strategy_sharpe"].round(2)
+            disp["buyhold_sharpe"] = disp["buyhold_sharpe"].round(2)
+            disp["delta_sharpe"] = disp["delta_sharpe"].round(2)
+
+            # Sort by delta_sharpe
+            disp = disp.sort_values("delta_sharpe", ascending=False)
+
+            st.markdown("##### Sweep results")
+
+            st.dataframe(format_metrics_table(metrics), use_container_width=True, hide_index=True)
+
+            st.caption("Tip: if signal_count is tiny (like 0–2), ignore the results. It’s not evidence.")
+        else:
+            st.info("Click **Run sweep** to generate the robustness table.")
 
 st.caption("🔗 Tip: Bookmark or share this URL to save the current view.")
 
-signal_count = int(summary.loc[summary["group"] == "signal_days", "count"].iloc[0])
-st.caption(
-    f"Note: signal days are often rare. You have **{signal_count}** signal day(s) in this sample for the current settings."
-)
-
-st.subheader("Backtest (Signal → Strategy)")
-
-# Equity curve chart
-fig3, ax3 = plt.subplots()
-ax3.plot(bt.index, bt["bh_equity"], label="Buy & Hold")
-ax3.plot(bt.index, bt["strat_equity"], label="Signal Strategy")
-ax3.set_ylabel("Equity (start = 1.0)")
-ax3.legend()
-st.pyplot(fig3)
-
-# Metrics table
-metrics_display = metrics.copy()
-for col in ["total_return", "ann_return", "ann_vol", "max_drawdown"]:
-    metrics_display[col] = (metrics_display[col] * 100).round(2)
-
-metrics_display["sharpe"] = metrics_display["sharpe"].round(2)
-
-st.dataframe(metrics_display, use_container_width=True, hide_index=True)
-
-st.caption(
-    "Strategy rule: if a signal triggers today, the strategy goes to cash starting next trading day for the cooldown window."
-)
+st.caption("Built in public. Educational signals, not financial advice.")

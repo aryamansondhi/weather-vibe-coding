@@ -1,4 +1,4 @@
-# 🌦️ Weather App (Vibe Coding)
+# 🌦️ Signal Lab (Vibe Coding)
 
 A premium dark-mode weather application built as part of a **100-day vibe coding challenge**.
 
@@ -8,14 +8,11 @@ This project focuses on **product thinking, data reasoning, and clean engineerin
 
 ## ✨ Features
 
-- 🌍 City search with geocoding  
-- 🌡️ Celsius ↔ Fahrenheit toggle  
-- 🎨 Dark UI with **weather-reactive theming**  
-- ⭐ Favorites (quick access cities)  
-- 📊 7-day forecast (chart + table)  
-- 🧠 Comfort Score (simple heuristic insight)  
-- ⚡ Cached API calls for fast reloads  
-- 🔗 URL-synced state (shareable & bookmarkable views)
+- 📈 **Market Data:** Real-time OHLCV fetching via Yahoo Finance.
+- ⚡ **Signal Engine:** Deviation-based mean reversion signals with customizable Moving Averages.
+- 🧪 **Backtest Lab:** Compare "Risk-Off" cooldown strategies against Buy & Hold equity curves.
+- 🎛️ **Robustness Sweep:** Grid search engine to test strategy performance across different volatility thresholds.
+- 🎨 **Pro UI:** Custom high-contrast dark mode with "SignalLab" branding.
 
 ---
 
@@ -66,16 +63,16 @@ Day 5: URL-synced state for shareable, reproducible views
 
 Day 6: Backtest layer (risk-off cooldown strategy), equity curves, and core risk metrics (Sharpe, drawdown, vol).
 
+Day 7: Robustness & Branding
+- **Backend:** Added parameter sweep (grid search) to test strategy robustness across various settings.
+- **Frontend:** Overhauled UI with a custom high-contrast dark theme, centered layout, and HTML-injected logo.
+
 📌 Next Ideas
 
-Hourly forecast strip
-
-Location auto-detect
-
-Deploy to Streamlit Cloud
-
-Historical comparisons
-
-Built with intention, not tutorials.
+📌 Next Ideas
+- [ ] Vectorize backtest engine (Performance upgrade)
+- [ ] Rolling risk metrics (Regime detection)
+- [ ] Interactive charts (Plotly integration)
+- [ ] Real-time data feed connection
 
 ---
