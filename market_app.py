@@ -37,9 +37,19 @@ def style_dark_ax(ax):
 
 def format_metrics_table(metrics):
     m = metrics.copy()
+    
+    # 1. Rename the row values to English
+    m["portfolio"] = m["portfolio"].replace({
+        "buy_hold": "Buy & Hold",
+        "strategy": "Active Strategy"
+    })
+
+    # 2. Format numbers as percentages
     for col in ["total_return", "ann_return", "ann_vol", "max_drawdown"]:
         m[col] = (m[col] * 100).round(2)
     m["sharpe"] = m["sharpe"].round(2)
+    
+    # 3. Rename columns
     return m.rename(columns={
         "portfolio": "Portfolio",
         "total_return": "Total Return (%)",
@@ -98,11 +108,6 @@ st.set_page_config(
 )
 
 # --- Logo ---
-# --- LOGO (HTML INJECTION) ---
-def get_base64_image(image_path):
-    with open(image_path, "rb") as img_file:
-        return base64.b64encode(img_file.read()).decode()
-
 # --- LOGO (HTML INJECTION) ---
 def get_base64_image(image_path):
     with open(image_path, "rb") as img_file:
@@ -353,9 +358,24 @@ with tab_overview:
         summary_display["mean_fwd_return"] = (summary_display["mean_fwd_return"] * 100).round(3)
         summary_display["median_fwd_return"] = (summary_display["median_fwd_return"] * 100).round(3)
 
+        # --- Rename Columns & Rows for Display ---
+        summary_display = summary_display.rename(columns={
+            "group": "Market State",
+            "count": "Count (Days)",
+            "mean_fwd_return": "Average Return (%)",
+            "median_fwd_return": "Median Return (%)"
+        })
+        
+        summary_display["Market State"] = summary_display["Market State"].replace({
+            "signal_days": "Signal Active",
+            "non_signal_days": "No Signal",
+            "overall": "Baseline (All Days)"
+        })
+
         st.caption("Forward returns grouped by signal vs non-signal days.")
 
-        st.dataframe(format_metrics_table(metrics), use_container_width=True, hide_index=True)
+        # Display the renamed table
+        st.dataframe(summary_display, use_container_width=True, hide_index=True)
 
         signal_count = int(summary.loc[summary["group"] == "signal_days", "count"].iloc[0])
         st.caption(
@@ -413,24 +433,40 @@ with tab_overview:
             if min_signals < 5:
                 st.warning("Low min signal threshold can produce misleading 'best' configs. Try 5+.")
 
-            # Filter weak sample sizes
+            # 1. Filter weak sample sizes
             res = res[res["signal_count"] >= min_signals].copy()
 
-            # Nice display formatting
+            # 2. Prepare Display DataFrame (Rounding)
             disp = res.copy()
             for col in ["strategy_total_return", "buyhold_total_return", "delta_total_return"]:
                 disp[col] = (disp[col] * 100).round(2)
+            
             disp["strategy_max_dd"] = (disp["strategy_max_dd"] * 100).round(2)
-            disp["strategy_sharpe"] = disp["strategy_sharpe"].round(2)
-            disp["buyhold_sharpe"] = disp["buyhold_sharpe"].round(2)
-            disp["delta_sharpe"] = disp["delta_sharpe"].round(2)
+            
+            for col in ["strategy_sharpe", "buyhold_sharpe", "delta_sharpe"]:
+                disp[col] = disp[col].round(2)
 
-            # Sort by delta_sharpe
+            # 3. Sort by Sharpe Improvement
             disp = disp.sort_values("delta_sharpe", ascending=False)
 
-            st.markdown("##### Sweep results")
+            # 4. Rename Columns for English Display
+            disp = disp.rename(columns={
+                "dev_pct": "Threshold (%)",
+                "cooldown_days": "Cooldown (Days)",
+                "signal_count": "Signals (Count)",
+                "strategy_total_return": "Strat Return (%)",
+                "strategy_sharpe": "Strat Sharpe",
+                "strategy_max_dd": "Strat Max DD (%)",
+                "buyhold_total_return": "B&H Return (%)",
+                "buyhold_sharpe": "B&H Sharpe",
+                "delta_total_return": "Return Diff (%)",
+                "delta_sharpe": "Sharpe Diff"
+            })
 
-            st.dataframe(format_metrics_table(metrics), use_container_width=True, hide_index=True)
+            st.markdown("##### Sweep results")
+            
+            # Display the CLEAN dataframe (disp), not the old variable
+            st.dataframe(disp, use_container_width=True, hide_index=True)
 
             st.caption("Tip: if signal_count is tiny (like 0–2), ignore the results. It’s not evidence.")
         else:
