@@ -416,9 +416,9 @@ with tab_overview:
 
     with tab_research:
         st.subheader("Research (Parameter Sweep)")
+        st.caption("Runs a grid over deviation threshold and cooldown to check robustness.")
 
-        st.caption("Runs a grid over deviation threshold and cooldown to check robustness. Filter out tiny sample sizes.")
-
+        # --- 1. RUN LOGIC ---
         if run_research:
             sweep_cfg = SweepConfig(
                 ma_short=cfg.ma_short,
@@ -426,49 +426,64 @@ with tab_overview:
                 dev_pcts=(1.0, 2.0, 3.0, 4.0, 5.0, 6.0),
                 cooldown_days=(1, 3, 5, 7, 10, 15),
             )
+            with st.spinner("Running sweep..."):
+                # Save results to session state
+                st.session_state["sweep_results"] = cached_sweep(df, sweep_cfg)
 
-            with st.spinner("Running sweep…"):
-                res = cached_sweep(df, sweep_cfg)
+        # --- 2. DISPLAY LOGIC (Direct Mode) ---
+        if "sweep_results" in st.session_state:
+            res = st.session_state["sweep_results"]
 
             if min_signals < 5:
                 st.warning("Low min signal threshold can produce misleading 'best' configs. Try 5+.")
 
-            # 1. Filter weak sample sizes
-            res = res[res["signal_count"] >= min_signals].copy()
-
-            # 2. Prepare Display DataFrame (Rounding)
-            disp = res.copy()
-            for col in ["strategy_total_return", "buyhold_total_return", "delta_total_return"]:
-                disp[col] = (disp[col] * 100).round(2)
+            # Filter weak sample sizes
+            filtered = res[res["signal_count"] >= min_signals].copy()
             
-            disp["strategy_max_dd"] = (disp["strategy_max_dd"] * 100).round(2)
-            
-            for col in ["strategy_sharpe", "buyhold_sharpe", "delta_sharpe"]:
-                disp[col] = disp[col].round(2)
+            if filtered.empty:
+                st.error("No strategies met the minimum signal count. Try lowering the filter.")
+            else:
+                # Prepare Display DataFrame
+                disp = filtered.copy()
+                for col in ["strategy_total_return", "buyhold_total_return", "delta_total_return"]:
+                    disp[col] = (disp[col] * 100).round(2)
+                
+                disp["strategy_max_dd"] = (disp["strategy_max_dd"] * 100).round(2)
+                
+                for col in ["strategy_sharpe", "buyhold_sharpe", "delta_sharpe"]:
+                    disp[col] = disp[col].round(2)
 
-            # 3. Sort by Sharpe Improvement
-            disp = disp.sort_values("delta_sharpe", ascending=False)
+                # Sort by Sharpe Improvement
+                disp = disp.sort_values("delta_sharpe", ascending=False)
 
-            # 4. Rename Columns for English Display
-            disp = disp.rename(columns={
-                "dev_pct": "Threshold (%)",
-                "cooldown_days": "Cooldown (Days)",
-                "signal_count": "Signals (Count)",
-                "strategy_total_return": "Strat Return (%)",
-                "strategy_sharpe": "Strat Sharpe",
-                "strategy_max_dd": "Strat Max DD (%)",
-                "buyhold_total_return": "B&H Return (%)",
-                "buyhold_sharpe": "B&H Sharpe",
-                "delta_total_return": "Return Diff (%)",
-                "delta_sharpe": "Sharpe Diff"
-            })
+                # Rename Columns
+                disp = disp.rename(columns={
+                    "dev_pct": "Threshold (%)",
+                    "cooldown_days": "Cooldown (Days)",
+                    "signal_count": "Signals (Count)",
+                    "strategy_total_return": "Strat Return (%)",
+                    "strategy_sharpe": "Strat Sharpe",
+                    "strategy_max_dd": "Strat Max DD (%)",
+                    "buyhold_total_return": "B&H Return (%)",
+                    "buyhold_sharpe": "B&H Sharpe",
+                    "delta_total_return": "Return Diff (%)",
+                    "delta_sharpe": "Sharpe Diff"
+                })
 
-            st.markdown("##### Sweep results")
-            
-            # Display the CLEAN dataframe (disp), not the old variable
-            st.dataframe(disp, use_container_width=True, hide_index=True)
+                # --- 3. INSTANT FEEDBACK ---
+                best_run = disp.iloc[0]
+                sharpe_diff = best_run["Sharpe Diff"]
+                
+                if sharpe_diff > 0.5:
+                     st.success(f"🚀 ALPHA DETECTED! Strategy beats Buy & Hold by {sharpe_diff} Sharpe points.")
+                elif sharpe_diff > 0:
+                    st.info(f"✅ Strategy beats Buy & Hold by {sharpe_diff} Sharpe points.")
+                else:
+                    st.warning("Strategy underperforms the market.")
 
-            st.caption("Tip: if signal_count is tiny (like 0–2), ignore the results. It’s not evidence.")
+                st.markdown("##### Sweep results")
+                st.dataframe(disp, use_container_width=True, hide_index=True)
+
         else:
             st.info("Click **Run sweep** to generate the robustness table.")
 

@@ -8,36 +8,35 @@ import pandas as pd
 
 @dataclass(frozen=True)
 class BacktestConfig:
-    cooldown_days: int = 5  # number of trading days to stay in cash after a signal
+    cooldown_days: int = 5
 
 
 def build_position_from_signal(signal: pd.Series, cooldown_days: int) -> pd.Series:
     """
     Long-only position (1=in market, 0=in cash).
-    If signal[t] is True, then position is set to 0 for the NEXT cooldown_days.
+    VECTORIZED VERSION: No for-loops. Uses rolling windows for speed.
     """
     if cooldown_days <= 0:
         raise ValueError("cooldown_days must be > 0")
 
+    # 1. Convert signal to boolean
     sig = signal.fillna(False).astype(bool)
 
-    # position defaults to 1 (in market)
-    pos = pd.Series(1.0, index=sig.index)
+    # 2. Create the "Risk Off" mask using a rolling window
+    # logic: if a signal happened in the last 'cooldown_days', we are out.
+    # .rolling().max() checks if ANY True value exists in the window.
+    # .shift(1) because the cooldown starts the NEXT day.
+    is_risk_off = (
+        sig.rolling(window=cooldown_days, min_periods=1)
+        .max()
+        .shift(1)
+        .fillna(0)
+        .astype(bool)
+    )
 
-    # iterate through signal points and set future windows to 0
-    # This is simple and explicit (fine for our dataset sizes).
-    idx = sig.index.to_list()
-
-    for i, is_sig in enumerate(sig.to_list()):
-        if not is_sig:
-            continue
-
-        # cash starts next day
-        start = i + 1
-        end = min(i + 1 + cooldown_days, len(idx))
-        if start < len(idx):
-            pos.loc[idx[start:end]] = 0.0
-
+    # 3. Position is inverse of Risk Off (1.0 = Invested, 0.0 = Cash)
+    pos = (~is_risk_off).astype(float)
+    
     return pos
 
 
@@ -48,12 +47,7 @@ def compute_equity_curves(
     cooldown_days: int = 5,
 ) -> pd.DataFrame:
     """
-    Returns a DataFrame with:
-      - bh_equity: buy & hold equity curve (starting at 1.0)
-      - strat_equity: strategy equity curve (starting at 1.0)
-      - position: 1 or 0 exposure used by strategy
-      - daily_ret: daily returns from price
-      - strat_ret: daily returns * position
+    Returns equity curves and daily returns.
     """
     if price_col not in df.columns:
         raise ValueError(f"Expected '{price_col}' column")
@@ -61,11 +55,14 @@ def compute_equity_curves(
         raise ValueError(f"Expected '{signal_col}' column")
 
     price = df[price_col]
+    
+    # Ensure price is a Series
     if isinstance(price, pd.DataFrame):
         price = price.iloc[:, 0]
 
     daily_ret = price.pct_change().fillna(0.0)
 
+    # Uses the new vectorized function
     position = build_position_from_signal(df[signal_col], cooldown_days=cooldown_days)
 
     strat_ret = daily_ret * position
@@ -85,19 +82,14 @@ def compute_equity_curves(
     )
     return out
 
+
 def max_drawdown(equity: pd.Series) -> float:
-    """
-    Max drawdown as a negative number (e.g., -0.12 for -12%).
-    """
     peak = equity.cummax()
     dd = equity / peak - 1.0
     return float(dd.min())
 
 
 def annualized_return(equity: pd.Series, periods_per_year: int = 252) -> float:
-    """
-    Approx CAGR from equity curve assuming daily periods.
-    """
     if len(equity) < 2:
         return 0.0
     total_return = float(equity.iloc[-1] / equity.iloc[0] - 1.0)
@@ -116,9 +108,6 @@ def sharpe_ratio(
     risk_free_rate_annual: float = 0.0,
     periods_per_year: int = 252,
 ) -> float:
-    """
-    Simple Sharpe using daily returns and constant annual risk-free rate.
-    """
     rf_daily = (1.0 + risk_free_rate_annual) ** (1.0 / periods_per_year) - 1.0
     excess = daily_returns - rf_daily
     vol = excess.std(ddof=0)
@@ -128,10 +117,6 @@ def sharpe_ratio(
 
 
 def summarize_backtest(bt: pd.DataFrame) -> pd.DataFrame:
-    """
-    Returns a small metrics table comparing Buy & Hold vs Strategy.
-    Expects columns: daily_ret, strat_ret, bh_equity, strat_equity
-    """
     bh_eq = bt["bh_equity"]
     st_eq = bt["strat_equity"]
 
