@@ -40,48 +40,34 @@ def build_position_from_signal(signal: pd.Series, cooldown_days: int) -> pd.Seri
     return pos
 
 
-def compute_equity_curves(
-    df: pd.DataFrame,
-    price_col: str = "Adj Close",
-    signal_col: str = "signal",
-    cooldown_days: int = 5,
-) -> pd.DataFrame:
+def compute_equity_curves(df, cooldown_days=5):
     """
-    Returns equity curves and daily returns.
+    Calculates equity curves and drawdown for B&H vs Strategy.
     """
-    if price_col not in df.columns:
-        raise ValueError(f"Expected '{price_col}' column")
-    if signal_col not in df.columns:
-        raise ValueError(f"Expected '{signal_col}' column")
-
-    price = df[price_col]
+    out = df.copy()
     
-    # Ensure price is a Series
-    if isinstance(price, pd.DataFrame):
-        price = price.iloc[:, 0]
-
-    daily_ret = price.pct_change().fillna(0.0)
-
-    # Uses the new vectorized function
-    position = build_position_from_signal(df[signal_col], cooldown_days=cooldown_days)
-
-    strat_ret = daily_ret * position
-
-    bh_equity = (1.0 + daily_ret).cumprod()
-    strat_equity = (1.0 + strat_ret).cumprod()
-
-    out = pd.DataFrame(
-        {
-            "daily_ret": daily_ret,
-            "position": position,
-            "strat_ret": strat_ret,
-            "bh_equity": bh_equity,
-            "strat_equity": strat_equity,
-        },
-        index=df.index,
-    )
+    # 1. Daily Returns
+    out["bh_rets"] = out["Adj Close"].pct_change().fillna(0)
+    
+    # 2. Strategy Logic (Stay in cash for X days after a signal)
+    out["is_cooldown"] = out["signal"].rolling(window=cooldown_days, min_periods=1).max().fillna(0)
+    out["strat_pos"] = 1 - out["is_cooldown"]
+    out["strat_rets"] = out["bh_rets"] * out["strat_pos"].shift(1).fillna(0)
+    
+    # 3. Equity Curves (Compounding)
+    out["bh_equity"] = (1 + out["bh_rets"]).cumprod()
+    out["strat_equity"] = (1 + out["strat_rets"]).cumprod()
+    
+    # 4. DRAWDOWN CALCULATION (The B2B Metric)
+    # High-water mark
+    out["bh_hwm"] = out["bh_equity"].cummax()
+    out["strat_hwm"] = out["strat_equity"].cummax()
+    
+    # Drawdown %
+    out["bh_dd"] = (out["bh_equity"] / out["bh_hwm"]) - 1
+    out["strat_dd"] = (out["strat_equity"] / out["strat_hwm"]) - 1
+    
     return out
-
 
 def max_drawdown(equity: pd.Series) -> float:
     peak = equity.cummax()
@@ -116,21 +102,34 @@ def sharpe_ratio(
     return float((excess.mean() / vol) * np.sqrt(periods_per_year))
 
 
-def summarize_backtest(bt: pd.DataFrame) -> pd.DataFrame:
-    bh_eq = bt["bh_equity"]
-    st_eq = bt["strat_equity"]
-
-    bh_ret = bt["daily_ret"]
-    st_ret = bt["strat_ret"]
-
-    out = pd.DataFrame(
-        {
-            "portfolio": ["buy_hold", "strategy"],
-            "total_return": [float(bh_eq.iloc[-1] - 1.0), float(st_eq.iloc[-1] - 1.0)],
-            "ann_return": [annualized_return(bh_eq), annualized_return(st_eq)],
-            "ann_vol": [annualized_volatility(bh_ret), annualized_volatility(st_ret)],
-            "max_drawdown": [max_drawdown(bh_eq), max_drawdown(st_eq)],
-            "sharpe": [sharpe_ratio(bh_ret), sharpe_ratio(st_ret)],
-        }
-    )
-    return out
+def summarize_backtest(bt_df):
+    """
+    Summarizes performance with a focus on Risk-Adjusted Metrics.
+    """
+    metrics = []
+    for col, name in [("bh", "Buy & Hold"), ("strat", "Tactical Risk-Off")]:
+        equity = bt_df[f"{col}_equity"]
+        rets = bt_df[f"{col}_rets"]
+        dd = bt_df[f"{col}_dd"]
+        
+        total_ret = equity.iloc[-1] - 1
+        ann_ret = (1 + total_ret) ** (252 / len(bt_df)) - 1
+        ann_vol = rets.std() * np.sqrt(252)
+        sharpe = ann_ret / ann_vol if ann_vol != 0 else 0
+        
+        # Risk Metrics
+        max_dd = dd.min()
+        # Calmar Ratio: Reward-to-Pain ratio
+        calmar = ann_ret / abs(max_dd) if max_dd != 0 else 0
+        
+        metrics.append({
+            "Portfolio": name,
+            "Total Return": total_ret,
+            "Ann. Return": ann_ret,
+            "Ann. Vol": ann_vol,
+            "Sharpe": sharpe,
+            "Max Drawdown": max_dd,
+            "Calmar": calmar
+        })
+        
+    return pd.DataFrame(metrics)

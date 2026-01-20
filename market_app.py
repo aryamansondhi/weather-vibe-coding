@@ -7,6 +7,7 @@ import streamlit as st
 import matplotlib.pyplot as plt
 import yfinance as yf
 import base64
+import seaborn as sns
 
 from data.market_data import MarketQuery, fetch_ohlc
 from signals.indicators import IndicatorConfig, compute_signals
@@ -35,29 +36,89 @@ def style_dark_ax(ax):
     for spine in ax.spines.values():
         spine.set_color(BORDER_SUBTLE)
 
+def plot_monthly_heatmap(bt_df):
+    # Calculate monthly compounding returns
+    monthly_rets = bt_df["strat_rets"].resample('ME').apply(lambda x: (1 + x).prod() - 1)
+    
+    # Reshape for the grid
+    df_h = monthly_rets.to_frame()
+    df_h['Year'] = df_h.index.year
+    df_h['Month'] = df_h.index.month_name().str[:3]
+    pivot = df_h.pivot(index='Year', columns='Month', values='strat_rets')
+    
+    # Order months correctly
+    m_order = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    pivot = pivot.reindex(columns=[m for m in m_order if m in pivot.columns])
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    fig.patch.set_facecolor(BG_MAIN)
+    
+    # Institutional 'RdYlGn' color scheme (Red for loss, Green for gain)
+    sns.heatmap(pivot * 100, annot=True, fmt=".1f", cmap="RdYlGn", center=0, 
+                cbar=False, ax=ax, annot_kws={"size": 9, "weight": "bold"})
+    
+    ax.set_title("Tactical Performance Attribution (%)", color=TEXT_PRIMARY, pad=15)
+    ax.tick_params(colors=TEXT_MUTED)
+    return fig
+
+def generate_risk_commentary(ticker, metrics_df, latest_data):
+    # Ensure numeric extraction
+    strat = metrics_df[metrics_df["Portfolio"] == "Tactical Risk-Off"].iloc[0]
+    bh = metrics_df[metrics_df["Portfolio"] == "Buy & Hold"].iloc[0]
+    
+    # Calculate differences
+    sharpe_diff = float(strat["Sharpe"]) - float(bh["Sharpe"])
+    bh_dd_abs = abs(float(bh["Max Drawdown"]))
+    strat_dd_abs = abs(float(strat["Max Drawdown"]))
+    dd_reduction = (bh_dd_abs - strat_dd_abs) * 100
+    
+    # Logic for status
+    status = "DEFENSIVE (Cash)" if latest_data["is_cooldown"] == 1 else "ACTIVE (Invested)"
+    
+    # Return raw bullet points (no extra HTML here)
+    return (
+        f"<li><b>Risk Regime</b>: {status}</li>"
+        f"<li><b>Alpha Generation</b>: +{sharpe_diff:.2f} Sharpe points vs Benchmark</li>"
+        f"<li><b>Risk Mitigation</b>: Max Drawdown reduced by {dd_reduction:.2f}%</li>"
+        f"<li><b>Current Deviation</b>: {latest_data['deviation']*100:.2f}%</li>"
+    )
+
 def format_metrics_table(metrics):
     m = metrics.copy()
     
-    # 1. Rename the row values to English
-    m["portfolio"] = m["portfolio"].replace({
-        "buy_hold": "Buy & Hold",
-        "strategy": "Active Strategy"
-    })
-
-    # 2. Format numbers as percentages
-    for col in ["total_return", "ann_return", "ann_vol", "max_drawdown"]:
-        m[col] = (m[col] * 100).round(2)
-    m["sharpe"] = m["sharpe"].round(2)
+    # 1. Format numbers as percentages for the B2B dashboard
+    pct_cols = ["Total Return", "Ann. Return", "Ann. Vol", "Max Drawdown"]
+    for col in pct_cols:
+        m[col] = (m[col] * 100).round(2).astype(str) + "%"
     
-    # 3. Rename columns
-    return m.rename(columns={
-        "portfolio": "Portfolio",
-        "total_return": "Total Return (%)",
-        "ann_return": "Ann Return (%)",
-        "ann_vol": "Ann Vol (%)",
-        "max_drawdown": "Max DD (%)",
-        "sharpe": "Sharpe",
-    })
+    # 2. Round the ratio columns
+    m["Sharpe"] = m["Sharpe"].round(2)
+    m["Calmar"] = m["Calmar"].round(2)
+    
+    return m
+
+def plot_drawdown_chart(bt_df):
+    fig, ax = plt.subplots(figsize=(12, 4))
+    fig.patch.set_facecolor(BG_MAIN)
+    style_dark_ax(ax)
+
+    # We plot the 'Underwater' area
+    ax.fill_between(bt_df.index, bt_df["bh_dd"] * 100, 0, 
+                   color=RED, alpha=0.3, label="B&H Drawdown")
+    ax.plot(bt_df.index, bt_df["strat_dd"] * 100, 
+            color=GREEN, label="Tactical Risk-Off Drawdown", linewidth=1.5)
+
+    ax.set_ylabel("Drawdown (%)")
+    ax.set_title("Underwater Analysis (Peak-to-Trough Decline)", color=TEXT_PRIMARY, pad=20)
+    
+    # Ensure the Y-axis makes sense (0% at top, negative below)
+    ax.set_ylim(top=0) 
+    
+    leg = ax.legend(frameon=False, loc="lower left")
+    for t in leg.get_texts():
+        t.set_color(TEXT_PRIMARY)
+        
+    return fig
 
 def _get_qp() -> dict:
     # Streamlit provides st.query_params in newer versions
@@ -306,7 +367,8 @@ with tab_overview:
     st.caption("Signals, backtest, and robustness in one place.")
 
     # --- At-a-glance metrics ---
-    latest = signals.iloc[-1]
+    latest = bt.iloc[-1]
+    analysis = generate_risk_commentary(ticker.upper(), metrics, latest)
 
     c1, c2, c3, c4 = st.columns([1.2, 1, 1, 1])
     c1.metric("Price", f"{latest['Adj Close']:.2f}")
@@ -348,71 +410,50 @@ with tab_overview:
     st.pyplot(fig2, use_container_width=True)
 
     with tab_strategy:
-        # --- Evaluation ---
-        st.markdown("##### Evaluation (baseline check)")
-
-        summary = summarize_signal_performance(signals, horizon_days=horizon_days)
-
-        # Make it readable as percentages
-        summary_display = summary.copy()
-        summary_display["mean_fwd_return"] = (summary_display["mean_fwd_return"] * 100).round(3)
-        summary_display["median_fwd_return"] = (summary_display["median_fwd_return"] * 100).round(3)
-
-        # --- Rename Columns & Rows for Display ---
-        summary_display = summary_display.rename(columns={
-            "group": "Market State",
-            "count": "Count (Days)",
-            "mean_fwd_return": "Average Return (%)",
-            "median_fwd_return": "Median Return (%)"
-        })
+        st.subheader("Tactical Risk Analytics")
         
-        summary_display["Market State"] = summary_display["Market State"].replace({
-            "signal_days": "Signal Active",
-            "non_signal_days": "No Signal",
-            "overall": "Baseline (All Days)"
-        })
+        # 1. Prepare Data
+        strat_row = metrics[metrics["Portfolio"] == "Tactical Risk-Off"].iloc[0]
+        bh_row = metrics[metrics["Portfolio"] == "Buy & Hold"].iloc[0]
+        
+        sharpe_diff = float(strat_row["Sharpe"]) - float(bh_row["Sharpe"])
+        # Calculate Drawdown reduction
+        dd_red = (abs(float(bh_row["Max Drawdown"])) - abs(float(strat_row["Max Drawdown"]))) * 100
+        
+        # Check if we are currently in cash
+        is_cash = latest["is_cooldown"] == 1
+        status_text = "DEFENSIVE (Cash)" if is_cash else "ACTIVE (Invested)"
+        status_color = "#FFDD55" if is_cash else "#00E050" # Yellow vs Green
 
-        st.caption("Forward returns grouped by signal vs non-signal days.")
+        # 2. Render the "Institutional Risk Summary" Card
+        # Use a standard HTML block to prevent tag leakage
+        st.markdown(f"""
+        <div style="background-color: #16161A; border: 1px solid {GREEN}; border-radius: 12px; padding: 20px; margin-bottom: 25px;">
+            <h4 style="color: {GREEN}; margin-top: 0; margin-bottom: 10px;">
+                🪄 Institutional Risk Summary
+            </h4>
+            <div style="color: {TEXT_PRIMARY}; line-height: 1.6; font-size: 16px;">
+                <ul style="margin-bottom: 0; padding-left: 20px;">
+                    <li><b>Risk Regime:</b> <span style="color:{status_color}; font-weight:bold;">{status_text}</span></li>
+                    <li><b>Alpha Generation:</b> {sharpe_diff:+.2f} Sharpe points vs Benchmark.</li>
+                    <li><b>Risk Mitigation:</b> Max Drawdown reduced by {dd_red:.2f}%.</li>
+                    <li><b>Current Deviation:</b> {latest['deviation']*100:.2f}%</li>
+                </ul>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-        # Display the renamed table
-        st.dataframe(summary_display, use_container_width=True, hide_index=True)
-
-        signal_count = int(summary.loc[summary["group"] == "signal_days", "count"].iloc[0])
-        st.caption(
-            f"Note: signal days are often rare. You have **{signal_count}** signal day(s) in this sample for the current settings."
-        )
-
-        st.subheader("Backtest (Signal → Strategy)")
-
-        # Equity curve chart
-        fig3, ax3 = plt.subplots(figsize=(12, 4))
-        fig3.patch.set_facecolor(BG_MAIN)
-        style_dark_ax(ax3)
-
-        ax3.plot(bt.index, bt["bh_equity"], label="Buy & Hold", color=NEUTRAL)
-        ax3.plot(bt.index, bt["strat_equity"], label="Signal Strategy", color=GREEN)
-        ax3.set_ylabel("Equity (start = 1.0)")
-
-        leg = ax3.legend(frameon=False)
-        for t in leg.get_texts():
-            t.set_color(TEXT_PRIMARY)
-
-        st.pyplot(fig3, use_container_width=True)
-
-        # Metrics table
-        metrics_display = metrics.copy()
-        for col in ["total_return", "ann_return", "ann_vol", "max_drawdown"]:
-            metrics_display[col] = (metrics_display[col] * 100).round(2)
-
-        metrics_display["sharpe"] = metrics_display["sharpe"].round(2)
-
-        st.markdown("##### Strategy metrics")
-
+        # 3. Metrics Table
         st.dataframe(format_metrics_table(metrics), use_container_width=True, hide_index=True)
-
-        st.caption(
-            "Strategy rule: if a signal triggers today, the strategy goes to cash starting next trading day for the cooldown window."
-        )
+        
+        st.divider()
+        
+        # 4. Visuals (Heatmap & Drawdown)
+        st.markdown("##### Monthly Performance Attribution (%)")
+        st.pyplot(plot_monthly_heatmap(bt), use_container_width=True)
+        
+        st.markdown("##### Drawdown Profile (Underwater Analysis)")
+        st.pyplot(plot_drawdown_chart(bt), use_container_width=True)
 
     with tab_research:
         st.subheader("Research (Parameter Sweep)")
