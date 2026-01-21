@@ -491,9 +491,6 @@ with tab_overview:
         st.markdown("##### Drawdown Profile (Underwater Analysis)")
         st.pyplot(plot_drawdown_chart(bt), use_container_width=True)
 
-        st.markdown("##### Drawdown Profile (Underwater Analysis)")
-        st.pyplot(plot_drawdown_chart(bt), use_container_width=True)
-
         # --- NEW: Data Export for Institutional Analysis ---
         st.divider()
         st.caption("📥 **Institutional Data Export**")
