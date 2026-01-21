@@ -36,6 +36,25 @@ def style_dark_ax(ax):
     for spine in ax.spines.values():
         spine.set_color(BORDER_SUBTLE)
 
+def render_disclaimer():
+    st.sidebar.markdown("---")
+    st.sidebar.caption("⚠️ **DISCLAIMER: EDUCATIONAL USE ONLY**")
+    st.sidebar.caption(
+        """
+        This application is for **research and demonstration purposes only**. 
+        It does not constitute financial advice, investment recommendations, 
+        or a solicitation to buy or sell any assets.
+        
+        * **No Liability:** The creator assumes no responsibility for any financial losses.
+        * **Data:** Market data is sourced from free third-party APIs (Yahoo Finance) 
+            and may be delayed or inaccurate.
+        * **Hypothetical:** Backtest results are based on historical data and 
+            do not guarantee future performance.
+            
+        **Trade at your own risk.**
+        """
+    )
+
 def plot_monthly_heatmap(bt_df):
     # Calculate monthly compounding returns
     monthly_rets = bt_df["strat_rets"].resample('ME').apply(lambda x: (1 + x).prod() - 1)
@@ -326,6 +345,7 @@ with st.sidebar:
         ma_long=ma_long,
         deviation_threshold=dev_pct / 100,
     )
+    render_disclaimer()
 
 _set_qp({
     "ticker": ticker.upper(),
@@ -454,6 +474,24 @@ with tab_overview:
         
         st.markdown("##### Drawdown Profile (Underwater Analysis)")
         st.pyplot(plot_drawdown_chart(bt), use_container_width=True)
+
+        st.markdown("##### Drawdown Profile (Underwater Analysis)")
+        st.pyplot(plot_drawdown_chart(bt), use_container_width=True)
+
+        # --- NEW: Data Export for Institutional Analysis ---
+        st.divider()
+        st.caption("📥 **Institutional Data Export**")
+        
+        # Convert to CSV
+        csv = bt.to_csv().encode('utf-8')
+        
+        st.download_button(
+            label="⬇️ Download Backtest Data (CSV)",
+            data=csv,
+            file_name=f"{ticker}_backtest_results.csv",
+            mime="text/csv",
+            help="Export daily returns, signals, and equity curves for external analysis."
+        )
 
     with tab_research:
         st.subheader("Research (Parameter Sweep)")
