@@ -347,6 +347,22 @@ with st.sidebar:
     )
     render_disclaimer()
 
+    # ... inside st.sidebar, after render_disclaimer() ...
+    
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(
+        """
+        <div style="text-align: center;">
+            <p style="font-size: 14px; color: #A0A0A8; margin-bottom: 5px;">
+                Engineered by <b>Aryaman Sondhi</b>
+            </p>
+            <a href="https://www.linkedin.com/in/aryaman-sondhi/" target="_blank">LinkedIn</a> • 
+            <a href="https://github.com/aryamansondhi" target="_blank">GitHub</a>
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
+
 _set_qp({
     "ticker": ticker.upper(),
     "period": period,
